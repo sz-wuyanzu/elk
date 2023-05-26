@@ -1,0 +1,16 @@
+version: "3"
+services:
+  elk:
+    image: sebp/elk
+    restart: always
+    ports:
+    - "5601:5601"
+    - "9200:9200"
+    - "5044:5044"
+    environment:
+    - "ES_JAVA_OPTS=-Xms16g -Xmx16g"
+    volumes:
+    - ${PWD}/elasticsearch/data:/var/lib/elasticsearch
+    - ${PWD}/elasticsearch/elasticsearch.yml:/etc/elasticsearch/elasticsearch.yml
+    - ${PWD}/conf.d:/etc/logstash/conf.d
+    - ${PWD}/kibana.yml:/opt/kibana/config/kibana.yml

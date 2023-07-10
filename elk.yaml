@@ -1,0 +1,515 @@
+
+---
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: kibana
+  namespace: elk
+  labels:
+    k8s.kuboard.cn/name: kibana
+  annotations: {}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kibana
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: kibana
+      annotations:
+        kubectl.kubernetes.io/restartedAt: '2023-07-10T11:44:41+08:00'
+    spec:
+      containers:
+        - name: kibana
+          image: 'kibana:7.14.0'
+          ports:
+            - containerPort: 5601
+              protocol: TCP
+          env:
+            - name: ELASTICSEARCH_HOSTS
+              value: 'http://es-cluster:9200'
+          resources:
+            limits:
+              cpu: '1'
+              memory: 1Gi
+            requests:
+              cpu: 500m
+              memory: 512Mi
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          imagePullPolicy: IfNotPresent
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+      dnsPolicy: ClusterFirst
+      securityContext: {}
+      schedulerName: default-scheduler
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 25%
+      maxSurge: 25%
+  revisionHistoryLimit: 10
+  progressDeadlineSeconds: 600
+
+---
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: logstash
+  namespace: elk
+  labels:
+    k8s.kuboard.cn/name: logstash
+  annotations: {}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: logstash
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: logstash
+      annotations:
+        kubectl.kubernetes.io/restartedAt: '2023-07-10T13:42:29+08:00'
+    spec:
+      volumes:
+        - name: volume-e4fyh
+          configMap:
+            name: logstash-cm
+            defaultMode: 420
+      containers:
+        - name: logstash
+          image: 'logstash:7.14.0'
+          ports:
+            - containerPort: 5044
+              protocol: TCP
+          resources:
+            limits:
+              cpu: '1'
+              memory: 1Gi
+            requests:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: volume-e4fyh
+              mountPath: /usr/share/logstash/pipeline/logstash.conf
+              subPath: logstash.conf
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          imagePullPolicy: IfNotPresent
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+      dnsPolicy: ClusterFirst
+      securityContext: {}
+      schedulerName: default-scheduler
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 25%
+      maxSurge: 25%
+  revisionHistoryLimit: 10
+  progressDeadlineSeconds: 600
+
+---
+kind: DaemonSet
+apiVersion: apps/v1
+metadata:
+  name: filebeat
+  namespace: elk
+  labels:
+    k8s-app: filebeat
+    k8s.kuboard.cn/name: filebeat
+  annotations:
+    deprecated.daemonset.template.generation: '6'
+spec:
+  selector:
+    matchLabels:
+      k8s-app: filebeat
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        k8s-app: filebeat
+      annotations:
+        kubectl.kubernetes.io/restartedAt: '2023-07-10T14:01:59+08:00'
+    spec:
+      volumes:
+        - name: config
+          configMap:
+            name: filebeat-cm
+            defaultMode: 416
+        - name: varlibdockercontainers
+          hostPath:
+            path: /var/lib/docker/containers
+            type: ''
+        - name: volume-r8bna
+          hostPath:
+            path: /var/log
+            type: ''
+        - name: volume-bw5sw
+          hostPath:
+            path: /var/lib/filebeat-data
+            type: DirectoryOrCreate
+      containers:
+        - name: filebeat
+          image: 'docker.elastic.co/beats/filebeat:7.9.3'
+          args:
+            - '-c'
+            - /etc/filebeat.yml
+            - '-e'
+          env:
+            - name: ELASTICSEARCH_HOST
+              value: elasticsearch
+            - name: ELASTICSEARCH_PORT
+              value: '9200'
+            - name: ELASTICSEARCH_USERNAME
+              value: elastic
+            - name: ELASTICSEARCH_PASSWORD
+              value: changeme
+            - name: ELASTIC_CLOUD_ID
+            - name: ELASTIC_CLOUD_AUTH
+            - name: LOGSTASH_HOST
+              value: 192.168.100.114
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: spec.nodeName
+            - name: LOGSTASH_PORT
+              value: '65340'
+          resources:
+            limits:
+              memory: 200Mi
+            requests:
+              cpu: 100m
+              memory: 100Mi
+          volumeMounts:
+            - name: config
+              readOnly: true
+              mountPath: /etc/filebeat.yml
+              subPath: filebeat.yml
+            - name: varlibdockercontainers
+              readOnly: true
+              mountPath: /var/lib/docker/containers
+            - name: volume-r8bna
+              mountPath: /var/log
+            - name: volume-bw5sw
+              mountPath: /usr/share/filebeat/data
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 0
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+      dnsPolicy: ClusterFirstWithHostNet
+      serviceAccountName: filebeat
+      serviceAccount: filebeat
+      hostNetwork: true
+      securityContext: {}
+      schedulerName: default-scheduler
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  revisionHistoryLimit: 10
+
+---
+kind: StatefulSet
+apiVersion: apps/v1
+metadata:
+  name: es-cluster
+  namespace: elk
+  labels:
+    k8s.kuboard.cn/name: es-cluster
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: elasticsearch
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: elasticsearch
+      annotations:
+        kubectl.kubernetes.io/restartedAt: '2023-07-10T13:58:16+08:00'
+    spec:
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: es-data
+        - name: config
+          configMap:
+            name: es-cm
+            defaultMode: 420
+      containers:
+        - name: elasticsearch
+          image: 'docker.elastic.co/elasticsearch/elasticsearch:7.14.0'
+          ports:
+            - containerPort: 9200
+              protocol: TCP
+            - containerPort: 9300
+              protocol: TCP
+          env:
+            - name: cluster.name
+              value: es-cluster
+            - name: node.name
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.name
+            - name: discovery.seed_hosts
+              value: >-
+                es-cluster-0.es-cluster,es-cluster-1.es-cluster,es-cluster-2.es-cluster
+            - name: cluster.initial_master_nodes
+              value: 'es-cluster-0,es-cluster-1,es-cluster-2'
+          resources:
+            limits:
+              cpu: '1'
+              memory: 2Gi
+            requests:
+              cpu: 500m
+              memory: 1Gi
+          volumeMounts:
+            - name: data
+              mountPath: /usr/share/elasticsearch/data
+            - name: config
+              mountPath: /usr/share/elasticsearch/config/elasticsearch.yml
+              subPath: elasticsearch.yml
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          imagePullPolicy: IfNotPresent
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+      dnsPolicy: ClusterFirst
+      securityContext: {}
+      schedulerName: default-scheduler
+  serviceName: es-cluster
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      partition: 0
+  revisionHistoryLimit: 10
+
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: es-cluster
+  namespace: elk
+spec:
+  ports:
+    - name: transport
+      protocol: TCP
+      port: 9300
+      targetPort: 9300
+    - name: rest
+      protocol: TCP
+      port: 9200
+      targetPort: 9200
+  selector:
+    app: elasticsearch
+  clusterIP: None
+  clusterIPs:
+    - None
+  type: ClusterIP
+  sessionAffinity: None
+
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: kibana
+  namespace: elk
+  labels:
+    k8s.kuboard.cn/name: kibana
+spec:
+  ports:
+    - name: zhn5g6
+      protocol: TCP
+      port: 5601
+      targetPort: 5601
+  selector:
+    app: kibana
+  type: ClusterIP
+  sessionAffinity: None
+
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: logstash
+  namespace: elk
+spec:
+  ports:
+    - name: beats
+      protocol: TCP
+      port: 5044
+      targetPort: 5044
+      nodePort: 65340
+    - name: tcp
+      protocol: TCP
+      port: 5000
+      targetPort: 5000
+      nodePort: 18785
+  selector:
+    app: logstash
+  type: NodePort
+  sessionAffinity: None
+  externalTrafficPolicy: Cluster
+
+---
+kind: Ingress
+apiVersion: networking.k8s.io/v1
+metadata:
+  name: kibana
+  namespace: elk
+  labels:
+    k8s.kuboard.cn/name: kibana
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: elk.chen.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: kibana
+                port:
+                  number: 5601
+
+---
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: es-cm
+  namespace: elk
+data:
+  elasticsearch.yml: |-
+    cluster.name: "es-cluster"
+    network.host: 0.0.0.0
+    node.max_local_storage_nodes: 3
+    xpack.security.enabled: false
+
+---
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: filebeat-cm
+  namespace: elk
+data:
+  filebeat.yml: |-
+    filebeat.inputs:
+    - type: container
+      enabled: true
+      paths:
+        - /var/log/containers/*.log
+      #多行合并
+      multiline:
+        pattern: '^\['
+        negate: true
+        match: after
+      fields:
+        #自定义字段用于logstash识别k8s输入的日志
+        env: ops
+
+      #禁止收集host.xxxx字段 
+      #publisher_pipeline.disable_host: true
+      processors:
+        - add_kubernetes_metadata:
+            in_cluster: true
+            include_labels:
+              - app
+              - k8s-app
+              - k8s-ns
+            include_annotations:
+              - k8s.cloud/controller-kind
+            #添加k8s描述字段
+            default_indexers.enabled: true
+            default_matchers.enabled: true
+            host: ${NODE_NAME}
+            matchers:
+            - logs_path:
+                logs_path: "/var/log/containers/"
+        - drop_fields:
+            #删除的多余字段
+            fields: ["host", "tags", "ecs", "log", "prospector", "agent", "input", "beat", "offset"]
+            ignore_missing: true
+    filebeat.config.modules:
+      # Glob pattern for configuration loading
+      path: ${path.config}/modules.d/*.yml
+      # Set to true to enable config reloading
+      reload.enabled: false
+
+    setup.template.settings:
+      index.number_of_shards: 1
+    output.logstash:
+          hosts: ["${LOGSTASH_HOST:logstash}:${LOGSTASH_PORT:5044}"]
+
+---
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: logstash-cm
+  namespace: elk
+data:
+  logstash.conf: |-
+    input {
+      beats {
+        port => 5044
+      }
+    }
+
+    output {
+      elasticsearch {
+        hosts => ["es-cluster-0.es-cluster:9200", "es-cluster-1.es-cluster:9200", "es-cluster-2.es-cluster:9200"]
+        index => "%{[fields][env]}-%{[kubernetes][namespace]}-%{[kubernetes][pod][name]}-%{+YYYY.MM.dd}"
+        #user => "elastic"
+        #password => "changeme"
+      }
+    }
+  logstash.yml: |-
+    http.host: "0.0.0.0"
+    xpack.monitoring.elasticsearch.hosts: ["es-cluster:9200"]
+
+---
+kind: Secret
+apiVersion: v1
+metadata:
+  name: filebeat-token-n9kb6
+  namespace: elk
+  annotations:
+    kubernetes.io/service-account.name: filebeat
+    kubernetes.io/service-account.uid: 5014a6a0-d8d9-4784-8be1-15ef2628fc7b
+data:
+  ca.crt: >-
+    LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUM1ekNDQWMrZ0F3SUJBZ0lCQURBTkJna3Foa2lHOXcwQkFRc0ZBREFWTVJNd0VRWURWUVFERXdwcmRXSmwKY201bGRHVnpNQjRYRFRJek1ETXpNREF6TkRjeE1sb1hEVE16TURNeU56QXpORGN4TWxvd0ZURVRNQkVHQTFVRQpBeE1LYTNWaVpYSnVaWFJsY3pDQ0FTSXdEUVlKS29aSWh2Y05BUUVCQlFBRGdnRVBBRENDQVFvQ2dnRUJBTXRoCkk1YzVZZ2tvSlZXVWJPM1FnVHhoakdCNVdnbHpadytRem9WSnRrMUVZaXpVTlZlWXpMMGFlNXZRYUxhYkRJc3MKd3N0aVRKSmQ3a2RmVjFCMiszbmRGT2JYOFU3RFNKSFd1T2h0UmJ0b0cydnh0NTI3Z2R2eWxOdFEyaENrd3ZhbwpITm00TEhQV2tkQWpEMVlublVDNWZSZWJmZWlJNmE4RkRYeVlCWHo1S3h0NnJ4QTlFYmZEb210NmZKL3lpeVRLClVBMjRIc2lSVUJMUkkzZXBLK0NaUkQ5Q3Vhb05Hcklkazh2UWpKZjNBKzJUQ1ZtZDBzT3RmdWg4cDg0NU9JTVgKZ2tDc1Z3Q0svVmY2NE01bnphWVNLUEdGM0l4RWlxS09iR0RYT3lmalUxT3g1STI3RUNzR3N5Sjl6em9Zb24vSQp1aWdtaWpQY20vMzE1Uy9sYWhFQ0F3RUFBYU5DTUVBd0RnWURWUjBQQVFIL0JBUURBZ0trTUE4R0ExVWRFd0VCCi93UUZNQU1CQWY4d0hRWURWUjBPQkJZRUZPdmpzMWJEUGdvYWtCTEJlWDYyaElvc2dzcC9NQTBHQ1NxR1NJYjMKRFFFQkN3VUFBNElCQVFCdFo4aE54OGQvZ3dydEwrY2JtZlBERlBXTEtlWDZMVmgxSXBRd0Q5dnZtWGxlQkswMAo3eFN2NTU2U3lXZmRzT0x5dndCaTYwVys1Z0F4NEdMNVorWVdvWDExOG1HMzkyOERmMVYvQ1RJUUtSOEtZZFZXCittVVpyVXQ4ak5OR1dqVXd6eXcrcWFCUisxWTlDOXMvRmNQaWp2NXJoNnNXS2M0NmZWVTBKS0pkMlhlbTZQZksKcmJFWmQvVmpXd2g1b2lNZW5pdXpEUEQ4RnNnbS9SQ1EyLzZyaGVmMDlSVGFIRzF5VXFRcDdDck41SDRwWWNMeQpnNURZL1J4OWlZa3B4bHdEQXh6QThTZGNCdis2akdWaUNUYXVTbWhlY1IyMytNejB5RHpCMWtrWGVzUlg5K2t3CngrR0lHMmhOMUhMWmpMZEVwdkdSc3ZQTUdTMVJnbnN1VVkySgotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCg==
+  namespace: ZWxr
+  token: >-
+    ZXlKaGJHY2lPaUpTVXpJMU5pSXNJbXRwWkNJNkltdElTa2RoVUZkb01UbFhTa05xYWxOTVIxYzNWbmxOV0ZSeWNYaE9kVlYyYjJOV00zaFRUMmRKVDBVaWZRLmV5SnBjM01pT2lKcmRXSmxjbTVsZEdWekwzTmxjblpwWTJWaFkyTnZkVzUwSWl3aWEzVmlaWEp1WlhSbGN5NXBieTl6WlhKMmFXTmxZV05qYjNWdWRDOXVZVzFsYzNCaFkyVWlPaUpsYkdzaUxDSnJkV0psY201bGRHVnpMbWx2TDNObGNuWnBZMlZoWTJOdmRXNTBMM05sWTNKbGRDNXVZVzFsSWpvaVptbHNaV0psWVhRdGRHOXJaVzR0YmpscllqWWlMQ0pyZFdKbGNtNWxkR1Z6TG1sdkwzTmxjblpwWTJWaFkyTnZkVzUwTDNObGNuWnBZMlV0WVdOamIzVnVkQzV1WVcxbElqb2labWxzWldKbFlYUWlMQ0pyZFdKbGNtNWxkR1Z6TG1sdkwzTmxjblpwWTJWaFkyTnZkVzUwTDNObGNuWnBZMlV0WVdOamIzVnVkQzUxYVdRaU9pSTFNREUwWVRaaE1DMWtPR1E1TFRRM09EUXRPR0psTVMweE5XVm1Nall5T0daak4ySWlMQ0p6ZFdJaU9pSnplWE4wWlcwNmMyVnlkbWxqWldGalkyOTFiblE2Wld4ck9tWnBiR1ZpWldGMEluMC5QTW53WUV5QzFaN0pBSk1oeTgxYzljQVBZbU92VG9COHkxY1R3V2NmLUJhTDg1M2FJdlo1M0NFbEpMUl9pdXRVa3VZT3ZWaHpOcEVHTGttbUx3aXh1V1NIWEpOWF9CeXlia29KNlFpMW5QSmNCRzBqdmZ2Y1hnM3FnOXU3VUxmQWQ5SDNvcjQ1d0wzZ2dRbnd0WE1MMjdOUkh0OHdLQVllakh6cmhETWQxRkc4Z3hyQ19yWTV4SkV3WWRFNEVkY1R3am42cnU4a0hKNXBzRDVUeURBWktxa3J4NERUeER2SmNXWmpaMTdDTl9vdFB6MG9JTnRuREFZUjlYV2NaS0dXQVRmY3E5S0ZUY1VWcEZ0TGRfQTVrX1lZaV9hSGhBcGh3Vjkyd1dMaTcySUdmLW9zWW1aMmVSUG1sOTFPcjdjQ08tZHN5LVd1Sl9QQWk4cUJuOE9odXc=
+type: kubernetes.io/service-account-token
+
+---
+kind: Secret
+apiVersion: v1
+metadata:
+  name: filebeat-token-s7qzc
+  namespace: elk
+  annotations:
+    kubernetes.io/service-account.name: filebeat
+    kubernetes.io/service-account.uid: 5014a6a0-d8d9-4784-8be1-15ef2628fc7b
+data:
+  ca.crt: >-
+    LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUM1ekNDQWMrZ0F3SUJBZ0lCQURBTkJna3Foa2lHOXcwQkFRc0ZBREFWTVJNd0VRWURWUVFERXdwcmRXSmwKY201bGRHVnpNQjRYRFRJek1ETXpNREF6TkRjeE1sb1hEVE16TURNeU56QXpORGN4TWxvd0ZURVRNQkVHQTFVRQpBeE1LYTNWaVpYSnVaWFJsY3pDQ0FTSXdEUVlKS29aSWh2Y05BUUVCQlFBRGdnRVBBRENDQVFvQ2dnRUJBTXRoCkk1YzVZZ2tvSlZXVWJPM1FnVHhoakdCNVdnbHpadytRem9WSnRrMUVZaXpVTlZlWXpMMGFlNXZRYUxhYkRJc3MKd3N0aVRKSmQ3a2RmVjFCMiszbmRGT2JYOFU3RFNKSFd1T2h0UmJ0b0cydnh0NTI3Z2R2eWxOdFEyaENrd3ZhbwpITm00TEhQV2tkQWpEMVlublVDNWZSZWJmZWlJNmE4RkRYeVlCWHo1S3h0NnJ4QTlFYmZEb210NmZKL3lpeVRLClVBMjRIc2lSVUJMUkkzZXBLK0NaUkQ5Q3Vhb05Hcklkazh2UWpKZjNBKzJUQ1ZtZDBzT3RmdWg4cDg0NU9JTVgKZ2tDc1Z3Q0svVmY2NE01bnphWVNLUEdGM0l4RWlxS09iR0RYT3lmalUxT3g1STI3RUNzR3N5Sjl6em9Zb24vSQp1aWdtaWpQY20vMzE1Uy9sYWhFQ0F3RUFBYU5DTUVBd0RnWURWUjBQQVFIL0JBUURBZ0trTUE4R0ExVWRFd0VCCi93UUZNQU1CQWY4d0hRWURWUjBPQkJZRUZPdmpzMWJEUGdvYWtCTEJlWDYyaElvc2dzcC9NQTBHQ1NxR1NJYjMKRFFFQkN3VUFBNElCQVFCdFo4aE54OGQvZ3dydEwrY2JtZlBERlBXTEtlWDZMVmgxSXBRd0Q5dnZtWGxlQkswMAo3eFN2NTU2U3lXZmRzT0x5dndCaTYwVys1Z0F4NEdMNVorWVdvWDExOG1HMzkyOERmMVYvQ1RJUUtSOEtZZFZXCittVVpyVXQ4ak5OR1dqVXd6eXcrcWFCUisxWTlDOXMvRmNQaWp2NXJoNnNXS2M0NmZWVTBKS0pkMlhlbTZQZksKcmJFWmQvVmpXd2g1b2lNZW5pdXpEUEQ4RnNnbS9SQ1EyLzZyaGVmMDlSVGFIRzF5VXFRcDdDck41SDRwWWNMeQpnNURZL1J4OWlZa3B4bHdEQXh6QThTZGNCdis2akdWaUNUYXVTbWhlY1IyMytNejB5RHpCMWtrWGVzUlg5K2t3CngrR0lHMmhOMUhMWmpMZEVwdkdSc3ZQTUdTMVJnbnN1VVkySgotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCg==
+  namespace: ZWxr
+  token: >-
+    ZXlKaGJHY2lPaUpTVXpJMU5pSXNJbXRwWkNJNkltdElTa2RoVUZkb01UbFhTa05xYWxOTVIxYzNWbmxOV0ZSeWNYaE9kVlYyYjJOV00zaFRUMmRKVDBVaWZRLmV5SnBjM01pT2lKcmRXSmxjbTVsZEdWekwzTmxjblpwWTJWaFkyTnZkVzUwSWl3aWEzVmlaWEp1WlhSbGN5NXBieTl6WlhKMmFXTmxZV05qYjNWdWRDOXVZVzFsYzNCaFkyVWlPaUpsYkdzaUxDSnJkV0psY201bGRHVnpMbWx2TDNObGNuWnBZMlZoWTJOdmRXNTBMM05sWTNKbGRDNXVZVzFsSWpvaVptbHNaV0psWVhRdGRHOXJaVzR0Y3pkeGVtTWlMQ0pyZFdKbGNtNWxkR1Z6TG1sdkwzTmxjblpwWTJWaFkyTnZkVzUwTDNObGNuWnBZMlV0WVdOamIzVnVkQzV1WVcxbElqb2labWxzWldKbFlYUWlMQ0pyZFdKbGNtNWxkR1Z6TG1sdkwzTmxjblpwWTJWaFkyTnZkVzUwTDNObGNuWnBZMlV0WVdOamIzVnVkQzUxYVdRaU9pSTFNREUwWVRaaE1DMWtPR1E1TFRRM09EUXRPR0psTVMweE5XVm1Nall5T0daak4ySWlMQ0p6ZFdJaU9pSnplWE4wWlcwNmMyVnlkbWxqWldGalkyOTFiblE2Wld4ck9tWnBiR1ZpWldGMEluMC5obWl6RXhiTUlKak9ZV3JQNVFpRE9jZm5LWk5rTnMzNU1Nb08zOXBFMVliRHZBNk9GQV9YbDBjMXA1cHJVdEVFMmFTbG0xVXJ2enVYN2hHdUVYeTVhaTdoQ0IyQlVKazVnQmFKXzJrc0xETHJpcTRwVURuZFBfMFhDczV1aVoxNXBhbDFlX0hlTlpJRnJheFFfY29hRk9sY0FmUzBUa2Q2ODFNc3ZoSV9tOWdmUWJ3UktfZnJsTTNSNG01Wkh6Tlp0aTBXdVJUd3JQVUh0dlpIbFRaanhCUF9sZzFtRHM3eVMyQjJRVzJtRDMwdjFKVkV2T2hyY0NKbGhFcXRtU29iUHhmMG5MRFZ6X0VZdldIelBYb2FmUlFfaGlDUEtibnlUbUI2ekluc0p1aV9rTlIxbldBSnJONTlHSGhQUk9RbEhhbnEyT24zMk05MEliTXVIeW1yRlE=
+type: kubernetes.io/service-account-token
+

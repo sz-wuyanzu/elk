@@ -19,7 +19,7 @@ data:
       multiline.timeout: 30
       fields:
         #自定义字段用于logstash识别k8s输入的日志
-        env: pre
+        env: ${env}
 
       #禁止收集host.xxxx字段 
       #publisher_pipeline.disable_host: true
@@ -44,7 +44,7 @@ data:
             fields: ["host", "tags", "ecs", "log", "prospector", "agent", "input", "beat", "offset"]
             ignore_missing: true
     output.logstash:
-          hosts: ["${LOGSTASH_HOST:127.0.0.1}:${LOGSTASH_PORT:5044}"]
+          hosts: ["${LOGSTASH_HOST:172.18.92.218}:${LOGSTASH_PORT:5044}"]
 
 ---
 apiVersion: apps/v1
@@ -87,8 +87,6 @@ spec:
           value:
         - name: ELASTIC_CLOUD_AUTH
           value:
-        - name: LOGSTASH_HOST
-          value: 172.18.81.1
         - name: NODE_NAME
           valueFrom:
             fieldRef:
